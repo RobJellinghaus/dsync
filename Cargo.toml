@@ -18,6 +18,9 @@ authors = [
 ]
 edition = "2021"
 
+# This directory is part of the parent create-rust-app workspace
+# [workspace]
+
 [features]
 default = ["tsync", "backtrace", "derive-queryablebyname"]
 # enable support for tsync (https://github.com/Wulf/tsync)
@@ -30,6 +33,8 @@ backtrace = []
 derive-queryablebyname = []
 # enable *experimental* queries
 advanced-queries = []
+# enable support for async-graphql (https://github.com/async-graphql/async-graphql)
+graphql = []
 
 [dependencies]
 clap = { version = "4.4", features = ["derive", "wrap_help"] }

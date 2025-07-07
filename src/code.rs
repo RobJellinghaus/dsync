@@ -142,6 +142,8 @@ pub mod derives {
     #[cfg(feature = "derive-queryablebyname")]
     pub const QUERYABLEBYNAME: &str = "diesel::QueryableByName";
     pub const PARTIALEQ: &str = "PartialEq";
+    #[cfg(feature = "graphql")]
+    pub const SIMPLEOBJECT: &str = "async_graphql::SimpleObject";
 }
 
 impl<'a> Struct<'a> {
@@ -215,6 +217,12 @@ impl<'a> Struct<'a> {
                     derives_vec.extend_from_slice(&[derives::ASSOCIATIONS, derives::IDENTIFIABLE]);
                 } else if !self.table.primary_key_columns.is_empty() {
                     derives_vec.push(derives::IDENTIFIABLE);
+                }
+
+                // Add GraphQL derives for Read structs
+                #[cfg(feature = "graphql")]
+                if self.config.table(&self.table.name.to_string()).get_graphql() {
+                    derives_vec.push(derives::SIMPLEOBJECT);
                 }
             }
             StructType::Update => {
@@ -690,11 +698,33 @@ pub fn generate_common_structs(table_options: &TableOptions<'_>) -> String {
     #[cfg(not(feature = "tsync"))]
     let tsync = "";
 
+    let mut derives = vec![derives::DEBUG];
+    
+    if table_options.get_serde() {
+        derives.push(derives::SERIALIZE);
+    }
+    
+    #[cfg(feature = "graphql")]
+    if table_options.get_graphql() {
+        derives.push(derives::SIMPLEOBJECT);
+    }
+
+    let generic_constraints = {
+        #[cfg(feature = "graphql")]
+        if table_options.get_graphql() {
+            "<T: Send + Sync + async_graphql::OutputType>"
+        } else {
+            "<T>"
+        }
+        #[cfg(not(feature = "graphql"))]
+        "<T>"
+    };
+
     formatdoc!(
         r##"
         /// Result of a `.paginate` function
-        {tsync}#[derive({debug_derive}, {serde_derive})]
-        pub struct PaginationResult<T> {{
+        {tsync}#[derive({derives})]
+        pub struct PaginationResult{generic_constraints} {{
             /// Resulting items that are from the current page
             pub items: Vec<T>,
             /// The count of total items there are
@@ -707,12 +737,7 @@ pub fn generate_common_structs(table_options: &TableOptions<'_>) -> String {
             pub num_pages: i64,
         }}
         "##,
-        serde_derive = if table_options.get_serde() {
-            derives::SERIALIZE
-        } else {
-            ""
-        },
-        debug_derive = derives::DEBUG
+        derives = derives.join(", ")
     )
 }
 
