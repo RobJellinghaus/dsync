@@ -222,7 +222,17 @@ impl<'a> Struct<'a> {
                 // Add GraphQL derives for Read structs
                 #[cfg(feature = "graphql")]
                 if self.config.table(&self.table.name.to_string()).get_graphql() {
-                    derives_vec.push(derives::SIMPLEOBJECT);
+                    // Check if this struct has ID fields that need custom handling
+                    let has_id_field = self.table.columns.iter().any(|col| {
+                        col.name.to_string().to_lowercase() == "id" 
+                        && self.table.primary_key_column_names().contains(&col.name.to_string())
+                        && (col.ty == "i32" || col.ty == "i64")
+                    });
+                    
+                    if !has_id_field {
+                        derives_vec.push(derives::SIMPLEOBJECT);
+                    }
+                    // If has_id_field is true, we'll generate a custom Object implementation later
                 }
             }
             StructType::Update => {
@@ -388,7 +398,7 @@ impl<'a> Struct<'a> {
             ),
         };
 
-        let struct_code = formatdoc!(
+        let mut struct_code = formatdoc!(
             r#"
             {doccomment}
             {tsync_attr}{derive_attr}
@@ -414,6 +424,45 @@ impl<'a> Struct<'a> {
             },
             lines = lines.join("\n"),
         );
+
+        // Add custom GraphQL Object implementation for structs with ID fields
+        #[cfg(feature = "graphql")]
+        if ty == StructType::Read && self.config.table(&table.name.to_string()).get_graphql() {
+            let has_id_field = table.columns.iter().any(|col| {
+                col.name.to_string().to_lowercase() == "id" 
+                && table.primary_key_column_names().contains(&col.name.to_string())
+                && (col.ty == "i32" || col.ty == "i64")
+            });
+            
+            if has_id_field {
+                let struct_name = ty.format(&table.struct_name);
+                let graphql_impl = formatdoc!(
+                    r#"
+
+                    #[async_graphql::Object]
+                    impl {struct_name} {{
+                        async fn id(&self) -> async_graphql::ID {{
+                            async_graphql::ID(self.id.to_string())
+                        }}
+
+                        async fn text(&self) -> &String {{
+                            &self.text
+                        }}
+
+                        async fn created_at(&self) -> &chrono::DateTime<chrono::Utc> {{
+                            &self.created_at
+                        }}
+
+                        async fn updated_at(&self) -> &chrono::DateTime<chrono::Utc> {{
+                            &self.updated_at
+                        }}
+                    }}
+                    "#,
+                    struct_name = struct_name
+                );
+                struct_code.push_str(&graphql_impl);
+            }
+        }
 
         self.has_fields = Some(true);
         self.rendered_code = Some(struct_code);
